@@ -1,5 +1,4 @@
 import argparse
-import os
 from pathlib import Path
 
 import cv2
@@ -31,6 +30,7 @@ def process_one(input_path: Path, output_path: Path, args) -> None:
         t0=args.t0,
         refine=not args.no_refine,
         use_clahe=not args.no_clahe,
+        white_balance=not args.no_wb,
     )
 
     save_output(result, output_path)
@@ -46,13 +46,13 @@ def self_test() -> None:
     clear[:, :, 2] = grad
 
     # Add synthetic haze: I = J*t + A*(1-t)
-    A = np.array([0.85, 0.85, 0.85], dtype=np.float32)  # bright airlight
+    A = np.array([0.85, 0.85, 0.85], dtype=np.float32)
     t = 0.55
     clear_f = clear.astype(np.float32) / 255.0
     hazy_f = clear_f * t + A.reshape(1, 1, 3) * (1 - t)
     hazy = (np.clip(hazy_f, 0, 1) * 255).astype(np.uint8)
 
-    out = dehaze_dcp_clahe(hazy, refine=True, use_clahe=True)
+    out = dehaze_dcp_clahe(hazy, refine=True, use_clahe=True, white_balance=True)
 
     if out.dtype != np.uint8 or out.shape != hazy.shape:
         raise AssertionError("Self-test failed: bad output shape/dtype")
@@ -65,12 +65,14 @@ def main():
     parser.add_argument("--input", "-i", required=True, help="Input image path OR folder of images")
     parser.add_argument("--output", "-o", required=True, help="Output image path OR output folder")
 
-    # Dev1 knobs (optional, but nice)
+    # Dev1 knobs
     parser.add_argument("--patch-size", type=int, default=15)
     parser.add_argument("--omega", type=float, default=0.95)
     parser.add_argument("--t0", type=float, default=0.1)
+
     parser.add_argument("--no-refine", action="store_true", help="Disable transmission refinement")
     parser.add_argument("--no-clahe", action="store_true", help="Disable CLAHE")
+    parser.add_argument("--no-wb", action="store_true", help="Disable white balance")
 
     parser.add_argument("--self-test", action="store_true", help="Run a quick synthetic sanity check and exit")
 
@@ -86,7 +88,7 @@ def main():
     if not in_path.exists():
         raise FileNotFoundError(f"Input not found: {in_path}")
 
-    # If input is a directory: output must be a directory
+    # Folder mode
     if in_path.is_dir():
         out_path.mkdir(parents=True, exist_ok=True)
         images = sorted([p for p in in_path.iterdir() if p.is_file() and is_image(p)])
@@ -97,10 +99,11 @@ def main():
             out_file = out_path / f"DCP_result_{p.name}"
             print(f"[DCP] {p.name} -> {out_file.name}")
             process_one(p, out_file, args)
+
         print("[DCP] Done (folder).")
         return
 
-    # Single image
+    # Single image mode
     if out_path.is_dir() or str(args.output).endswith(("/", "\\")):
         out_path.mkdir(parents=True, exist_ok=True)
         out_file = out_path / f"DCP_result_{in_path.name}"

@@ -8,7 +8,7 @@ import numpy as np
 
 def _dark_channel(img_bgr_float01: np.ndarray, patch_size: int) -> np.ndarray:
     """
-    Dark channel = min over RGB channels, then min-filter over a local patch.
+    Dark channel = min over BGR channels, then min-filter over a local patch.
     img_bgr_float01: float32 image in [0,1]
     """
     min_per_pixel = np.min(img_bgr_float01, axis=2)
@@ -84,13 +84,30 @@ def _recover_radiance(
     t0: float
 ) -> np.ndarray:
     """
-    Reconstruction formula from your project:
+    Reconstruction formula:
       J(x) = (I(x) - A) / max(t(x), t0) + A
     """
     t_clip = np.maximum(t, t0)[:, :, None]
     A_vec = A.reshape(1, 1, 3)
     J = (img_bgr_float01 - A_vec) / t_clip + A_vec
     return np.clip(J, 0.0, 1.0).astype(np.float32)
+
+
+# =========================
+# Color correction (fix blue cast)
+# =========================
+
+def _gray_world_white_balance(img_bgr_uint8: np.ndarray) -> np.ndarray:
+    """
+    Simple gray-world white balance to reduce strong color casts
+    (common DCP failure mode on bluish haze/smoke).
+    """
+    img = img_bgr_uint8.astype(np.float32)
+    mean = img.mean(axis=(0, 1))  # (B, G, R)
+    gray = mean.mean()
+    scale = gray / (mean + 1e-6)
+    out = img * scale.reshape(1, 1, 3)
+    return np.clip(out, 0, 255).astype(np.uint8)
 
 
 # =========================
@@ -123,12 +140,14 @@ def dehaze_dcp_clahe(
     t0: float = 0.1,
     refine: bool = True,
     use_clahe: bool = True,
+    white_balance: bool = True,
 ) -> np.ndarray:
     """
     Dev 1 baseline:
       - DCP transmission + atmospheric light
       - Reconstruction using J(x)
-      - CLAHE contrast enhancement
+      - Optional white balance (reduces blue cast)
+      - Optional CLAHE contrast enhancement
     """
     img_float = img_bgr_uint8.astype(np.float32) / 255.0
 
@@ -141,6 +160,9 @@ def dehaze_dcp_clahe(
 
     J = _recover_radiance(img_float, t, A, t0)
     out = (J * 255.0).astype(np.uint8)
+
+    if white_balance:
+        out = _gray_world_white_balance(out)
 
     if use_clahe:
         out = _apply_clahe_lab(out)
