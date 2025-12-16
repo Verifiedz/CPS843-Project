@@ -1,0 +1,15 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Environments
+.venv/
+env/
+.vscode/
+
+# Data and Results (Too large for Git)
+data/
+outputs/
+
+# OS specific
+.DS_Store
